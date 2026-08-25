@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NOVA — AI-Powered Reasearch Assistant</title>
+  <meta name="description"
+    content="Upload your research PDFs and chat with an AI that retrieves relevant context, generates accurate answers with citations, and remembers your conversation." />
+  <link rel="stylesheet" href="/static/index.css?v=2.8.0" />
+  <!-- KaTeX for Mathematical Expressions & Symbols -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <!-- Marked for Rich Markdown Parsing (Tables, Code blocks) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- PDF.js for In-App PDF Viewing & Page Jumping -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>" />
+</head>
+
+<body>
+  <!-- Toast Notifications -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <div class="app-container">
+    <!-- Sidebar Mobile Backdrop Overlay -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+    <!-- ===== Sidebar ===== -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <div class="logo-icon">🧠</div>
+          <span class="logo-text">NOVA</span>
+        </div>
+        <div class="logo-subtitle">AI-Powered Research Assistant</div>
+        <button class="sidebar-close-btn" id="sidebar-close-btn" aria-label="Close sidebar">✕</button>
+      </div>
+
+      <!-- ===== Documents Panel ===== -->
+      <div class="sidebar-panel active" id="panel-docs">
+        <!-- Upload Zone -->
+        <div class="upload-section">
+          <label for="upload-input" class="upload-zone" id="upload-zone">
+            <div class="upload-zone-content">
+              <span class="upload-icon">📄</span>
+              <div class="upload-title">Upload PDF Documents</div>
+              <div class="upload-hint">Drag & drop or click to browse</div>
+            </div>
+          </label>
+          <input type="file" class="upload-input" id="upload-input" accept=".pdf,application/pdf" multiple
+            style="display: none;" />
+
+          <!-- Upload Progress Indicator -->
+          <div class="upload-progress" id="upload-progress">
+            <div class="progress-bar-container">
+              <div class="progress-bar-fill" id="progress-bar-fill"></div>
+            </div>
+            <div class="progress-text" id="progress-text">Uploading...</div>
+          </div>
+        </div>
+
+        <!-- Document List -->
+        <div class="documents-section">
+          <div class="section-label">Uploaded Documents</div>
+          <ul class="document-list" id="document-list">
+            <li class="no-documents" id="no-documents">
+              <span>📂</span>
+              No documents uploaded yet
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Clear Conversation -->
+      <div class="sidebar-footer">
+        <button class="clear-btn" id="clear-btn" title="Clear current conversation">
+          🗑️ Clear Conversation
+        </button>
+      </div>
+    </aside>
+
+    <!-- ===== Main Content ===== -->
+    <main class="main-content">
+      <!-- Header -->
+      <header class="chat-header">
+        <div class="header-left">
+          <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle sidebar menu">
+            <span>📁</span>
+            <span class="mobile-menu-text">Docs</span>
+          </button>
+          <div>
+            <div class="header-title" id="active-chat-title">Chat</div>
+            <div class="header-status">
+              <span class="status-dot"></span>
+              <span id="header-status-text">Ready — upload documents to start</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <button class="header-action-btn" id="export-chat-btn" title="Export conversation to Markdown file">
+            📥 Export Chat
+          </button>
+          <!-- Mode Selector -->
+          <div class="mode-selector" id="mode-selector">
+            <button class="mode-btn active" data-mode="beginner"
+              title="Simple language, intuitive analogies, under 250 words">🌱 Beginner</button>
+            <button class="mode-btn" data-mode="research"
+              title="Technical rigor, formulas, trade-offs, under 500 words">🔬 Research</button>
+            <button class="mode-btn" data-mode="interview"
+              title="Structured interview style, bullet points, under 350 words">🎯 Interview</button>
+          </div>
+        </div>
+      </header>
+
+      <!-- Chat Messages -->
+      <div class="chat-area" id="chat-area">
+        <!-- Welcome State -->
+        <div class="welcome-state" id="welcome-state">
+          <span class="welcome-icon">🤖</span>
+          <h1 class="welcome-title">Your AI Research Assistant</h1>
+          <p class="welcome-subtitle">
+            Upload your PDF documents, choose a response mode, and ask questions.
+            I'll retrieve the most relevant context and generate accurate, cited answers with real-time streaming and
+            math notation.
+          </p>
+          <div class="welcome-steps">
+            <div class="welcome-step">
+              <span class="welcome-step-icon">📤</span>
+              <span class="welcome-step-label">Upload PDFs</span>
+            </div>
+            <div class="welcome-step">
+              <span class="welcome-step-icon">🎛️</span>
+              <span class="welcome-step-label">Pick a Mode</span>
+            </div>
+            <div class="welcome-step">
+              <span class="welcome-step-icon">💬</span>
+              <span class="welcome-step-label">Ask Questions</span>
+            </div>
+          </div>
+
+          <!-- Suggested Starter Questions -->
+          <div class="suggestions-wrapper" id="suggestions-wrapper" style="display: none;">
+            <div class="suggestions-title">💡 Suggested Questions for Your Documents</div>
+            <div class="suggestions-chips" id="suggestions-chips"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Suggestions Bar -->
+      <div class="chat-suggestions-bar" id="chat-suggestions-bar" style="display: none;">
+        <span class="bar-label">💡 Suggested:</span>
+        <div class="bar-chips" id="bar-chips"></div>
+      </div>
+
+      <!-- Chat Input Area -->
+      <div class="chat-input-container">
+        <div class="chat-input-wrapper">
+          <textarea class="chat-input" id="chat-input"
+            placeholder="Ask a question about your documents or request explanations..." rows="1"
+            aria-label="Chat message input"></textarea>
+
+          <!-- Voice Input Button (Mic) -->
+          <button class="voice-btn" id="voice-btn" title="Speak question (Voice Input)">
+            🎙️
+          </button>
+
+          <button class="send-btn" id="send-btn" title="Send message" disabled>
+            ➤
+          </button>
+        </div>
+        <!-- <div class="input-hint">Press Enter to send · Shift+Enter for new line · Mic 🎙️ and Audio 🔊 enabled</div> -->
+      </div>
+    </main>
+  </div>
+
+  <!-- ===== In-App PDF Viewer Modal (PDF.js) ===== -->
+  <div class="modal-backdrop" id="pdf-modal" style="display: none;">
+    <div class="pdf-viewer-card">
+      <div class="pdf-viewer-header">
+        <div class="pdf-title-group">
+          <span class="doc-icon">📑</span>
+          <div>
+            <h3 class="pdf-title" id="pdf-doc-title">Document.pdf</h3>
+            <div class="pdf-page-indicator">Viewing Page <span id="pdf-current-page">1</span> of <span
+                id="pdf-total-pages">1</span></div>
+          </div>
+        </div>
+
+        <div class="pdf-controls">
+          <button class="pdf-ctrl-btn" id="pdf-prev-btn" title="Previous Page">◀ Prev</button>
+          <span class="pdf-page-badge" id="pdf-page-badge">Pg 1</span>
+          <button class="pdf-ctrl-btn" id="pdf-next-btn" title="Next Page">Next ▶</button>
+          <span class="ctrl-separator"></span>
+          <button class="pdf-ctrl-btn" id="pdf-zoom-out-btn" title="Zoom Out">🔍−</button>
+          <button class="pdf-ctrl-btn" id="pdf-zoom-in-btn" title="Zoom In">🔍+</button>
+          <span class="ctrl-separator"></span>
+          <button class="modal-close-btn" id="pdf-close-btn" title="Close PDF Viewer">✕</button>
+        </div>
+      </div>
+
+      <div class="pdf-viewer-body" id="pdf-viewer-body">
+        <div class="pdf-canvas-container" id="pdf-canvas-container">
+          <canvas id="pdf-canvas"></canvas>
+        </div>
+        <div class="pdf-loading" id="pdf-loading" style="display: none;">
+          <div class="loading-spinner"></div>
+          <span>Loading page...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Source Passage Preview Modal ===== -->
+  <div class="modal-backdrop" id="source-modal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-badge" id="modal-source-rank">#1</div>
+          <div>
+            <h3 class="modal-title" id="modal-doc-title">Document Name</h3>
+            <div class="modal-meta" id="modal-meta">Page 1</div>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="modal-close-btn" title="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-section-label">EXTRACTED PASSAGE FROM DOCUMENT</div>
+        <div class="passage-box" id="modal-passage-text"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-action-btn secondary" id="modal-view-pdf-btn">📑 View in PDF</button>
+        <button class="modal-action-btn secondary" id="modal-copy-btn">📋 Copy Passage</button>
+        <button class="modal-action-btn primary" id="modal-done-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=2.8.0"></script>
+</body>
+
+</html>
