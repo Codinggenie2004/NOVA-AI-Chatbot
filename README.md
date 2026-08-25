@@ -1,37 +1,41 @@
-<![CDATA[<div align="center">
-
 # 🧠 NOVA — AI-Powered Research Assistant
 
-**Upload PDFs. Ask Questions. Get Cited Answers.**
+> **Upload PDFs. Ask Questions. Get Cited Answers.**
 
-A full-stack Retrieval-Augmented Generation (RAG) chatbot that lets you upload research PDFs, ask questions in natural language, and receive accurate, citation-backed answers with real-time streaming — powered by Google Gemini and sentence-transformers.
+A full-stack **Retrieval-Augmented Generation (RAG)** chatbot that lets you upload research PDFs, ask questions in natural language, and receive accurate, citation-backed answers with real-time streaming — powered by **Google Gemini** and **sentence-transformers**.
 
-[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Gemini](https://img.shields.io/badge/Google%20Gemini-AI-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev)
-[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
-
-</div>
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688?logo=fastapi&logoColor=white)
+![Gemini](https://img.shields.io/badge/Google_Gemini-AI-4285F4?logo=google&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ---
 
 ## ✨ Features
 
-| Feature | Description |
-|---|---|
-| 📄 **Multi-Document RAG** | Upload multiple PDFs — text is extracted page-by-page, chunked into 500-character segments, and embedded using `all-MiniLM-L6-v2` |
-| 🔍 **Smart Retrieval** | Cosine similarity search with a 0.35 threshold filter returns only the most relevant chunks |
-| 📑 **Source Citations** | Every answer includes structured citations with document name, page number, and relevance rank |
-| 💬 **Conversation Memory** | Multi-turn session history preserves context across follow-up questions |
-| 🎛️ **3 Response Modes** | **Beginner** (simple analogies), **Research** (technical depth), **Interview** (structured bullet points) |
-| ⚡ **Real-Time Streaming** | Token-by-token response streaming via Server-Sent Events (SSE) |
-| 📐 **Math Rendering** | KaTeX integration for rendering mathematical expressions and formulas |
-| 🎙️ **Voice Input** | Speech-to-text via the Web Speech API — speak your questions |
-| 🔊 **Read Aloud** | Text-to-speech to listen to AI responses |
-| 📑 **In-App PDF Viewer** | Built-in PDF.js viewer with page navigation, zoom controls, and citation-linked page jumping |
-| 💡 **AI Starter Questions** | Auto-generated exploration questions tailored to each uploaded document |
-| 📥 **Export Chat** | Download your conversation as a Markdown file |
-| 🌙 **Premium Dark UI** | Glassmorphism design with smooth animations, gradient accents, and responsive layout |
+🔹 **Multi-Document RAG** — Upload multiple PDFs; text is extracted, chunked (500 chars), and embedded with `all-MiniLM-L6-v2`
+
+🔹 **Smart Retrieval** — Cosine similarity search with a `0.35` threshold returns only the most relevant passages
+
+🔹 **Source Citations** — Every answer includes document name, page number, and relevance rank
+
+🔹 **Conversation Memory** — Multi-turn session history preserves context across follow-up questions
+
+🔹 **3 Response Modes** — 🌱 Beginner (simple analogies) · 🔬 Research (technical depth) · 🎯 Interview (bullet points)
+
+🔹 **Real-Time Streaming** — Token-by-token response via Server-Sent Events (SSE)
+
+🔹 **Math Rendering** — KaTeX integration for LaTeX formulas and expressions
+
+🔹 **Voice Input & Read Aloud** — Speak your questions and listen to AI responses
+
+🔹 **In-App PDF Viewer** — PDF.js-powered viewer with zoom, page navigation, and citation-linked page jumping
+
+🔹 **AI Starter Questions** — Auto-generated exploration questions tailored to each uploaded document
+
+🔹 **Export Chat** — Download conversations as Markdown files
+
+🔹 **Premium Dark UI** — Glassmorphism design with gradients, animations, and full mobile responsiveness
 
 ---
 
@@ -39,54 +43,39 @@ A full-stack Retrieval-Augmented Generation (RAG) chatbot that lets you upload r
 
 This project implements the complete RAG research pipeline:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        NOVA Architecture                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  Phase 1: Multi-Document Ingestion                              │
-│  ├── PDF text extraction (pypdf)                                │
-│  └── 500-character chunking with page-level tracking            │
-│                                                                 │
-│  Phase 2: Source Tracking                                       │
-│  └── Each chunk stores: { text, document_name, page_number }   │
-│                                                                 │
-│  Phase 3: Citation Generation                                   │
-│  └── Structured citations (doc + page + rank) sent per answer   │
-│                                                                 │
-│  Phase 4: Retrieval Quality                                     │
-│  ├── Cosine similarity with all-MiniLM-L6-v2 embeddings        │
-│  ├── Top-5 retrieval with 0.35 similarity threshold             │
-│  └── Contextual fallback using conversation history             │
-│                                                                 │
-│  Phase 5: Conversation Memory                                   │
-│  └── Session-based multi-turn chat history                      │
-│                                                                 │
-│  Phase 6: Advanced Prompt Engineering                            │
-│  └── 3 mode-specific prompt templates (Beginner/Research/       │
-│      Interview) with history + context injection                │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+| Phase | Name | What It Does |
+|:-----:|------|--------------|
+| **1** | Multi-Document Ingestion | PDF text extraction via `pypdf`, split into 500-char chunks |
+| **2** | Source Tracking | Each chunk stores `{ text, document_name, page_number }` metadata |
+| **3** | Citation Generation | Structured citations (doc + page + rank) returned with every answer |
+| **4** | Retrieval Quality | Cosine similarity with `all-MiniLM-L6-v2`, top-5 results, 0.35 threshold filter |
+| **5** | Conversation Memory | Session-based multi-turn chat history with contextual follow-up fallback |
+| **6** | Prompt Engineering | 3 mode-specific prompt templates with history + context injection |
 
 ---
 
 ## 🛠️ Tech Stack
 
 ### Backend
-- **[FastAPI](https://fastapi.tiangolo.com/)** — High-performance async Python web framework
-- **[Google Gemini](https://ai.google.dev/)** (`gemini-3.6-flash`) — LLM for answer generation
-- **[Sentence Transformers](https://www.sbert.net/)** (`all-MiniLM-L6-v2`) — Dense vector embeddings
-- **[scikit-learn](https://scikit-learn.org/)** — Cosine similarity computation
-- **[pypdf](https://pypdf.readthedocs.io/)** — PDF text extraction
-- **[Uvicorn](https://www.uvicorn.org/)** — ASGI server
+
+| Technology | Purpose |
+|------------|---------|
+| [FastAPI](https://fastapi.tiangolo.com/) | Async Python web framework |
+| [Google Gemini](https://ai.google.dev/) (`gemini-3.6-flash`) | LLM for answer generation |
+| [Sentence Transformers](https://www.sbert.net/) (`all-MiniLM-L6-v2`) | Dense vector embeddings |
+| [scikit-learn](https://scikit-learn.org/) | Cosine similarity computation |
+| [pypdf](https://pypdf.readthedocs.io/) | PDF text extraction |
+| [Uvicorn](https://www.uvicorn.org/) | ASGI server |
 
 ### Frontend
-- **Vanilla HTML/CSS/JavaScript** — No framework dependencies
-- **[PDF.js](https://mozilla.github.io/pdf.js/)** — In-app PDF rendering
-- **[KaTeX](https://katex.org/)** — LaTeX math rendering
-- **[Marked](https://marked.js.org/)** — Markdown-to-HTML parsing
-- **Web Speech API** — Voice input & text-to-speech
+
+| Technology | Purpose |
+|------------|---------|
+| Vanilla HTML / CSS / JS | Zero-dependency frontend |
+| [PDF.js](https://mozilla.github.io/pdf.js/) | In-app PDF rendering |
+| [KaTeX](https://katex.org/) | LaTeX math rendering |
+| [Marked](https://marked.js.org/) | Markdown → HTML parsing |
+| Web Speech API | Voice input & text-to-speech |
 
 ---
 
@@ -94,23 +83,23 @@ This project implements the complete RAG research pipeline:
 
 ### Prerequisites
 
-- Python 3.10+
+- **Python 3.10+**
 - A [Google Gemini API key](https://aistudio.google.com/apikey)
 
-### 1. Clone the Repository
+### 1️⃣ Clone the Repository
 
 ```bash
 git clone https://github.com/Codinggenie2004/NOVA-AI-Chatbot.git
 cd NOVA-AI-Chatbot
 ```
 
-### 2. Install Dependencies
+### 2️⃣ Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Set Up Environment Variables
+### 3️⃣ Set Up Environment Variables
 
 Create a `.env` file in the project root:
 
@@ -118,30 +107,29 @@ Create a `.env` file in the project root:
 GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-### 4. Run the Application
+### 4️⃣ Run the Application
 
 ```bash
 python app.py
 ```
 
-The server will start at **http://localhost:8000**. Open it in your browser to begin.
+Open **http://localhost:8000** in your browser and start uploading PDFs!
 
 ---
 
-## 📡 API Reference
+## 📡 API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/` | Serve the frontend UI |
-| `POST` | `/api/upload` | Upload a PDF document for indexing |
-| `GET` | `/api/documents` | List all indexed documents & chunk count |
-| `GET` | `/api/documents/{filename}/file` | Serve a PDF file for in-app viewing |
-| `DELETE` | `/api/documents/{filename}` | Remove a document from the index |
-| `POST` | `/api/chat` | Send a question (SSE streaming response) |
-| `POST` | `/api/chat/stream` | Alias for `/api/chat` |
-| `POST` | `/api/chat/clear?session_id=...` | Clear conversation history for a session |
+| `POST` | `/api/upload` | Upload a PDF for indexing |
+| `GET` | `/api/documents` | List all indexed documents |
+| `GET` | `/api/documents/{filename}/file` | Serve PDF for in-app viewing |
+| `DELETE` | `/api/documents/{filename}` | Remove a document from index |
+| `POST` | `/api/chat` | Send a question (SSE streaming) |
+| `POST` | `/api/chat/clear?session_id=...` | Clear session history |
 
-### Chat Request Body
+### Request Body (`/api/chat`)
 
 ```json
 {
@@ -151,7 +139,7 @@ The server will start at **http://localhost:8000**. Open it in your browser to b
 }
 ```
 
-**Modes:** `beginner` | `research` | `interview`
+> **Modes:** `beginner` · `research` · `interview`
 
 ---
 
@@ -159,40 +147,37 @@ The server will start at **http://localhost:8000**. Open it in your browser to b
 
 ```
 NOVA-AI-Chatbot/
-├── app.py                 # FastAPI backend — all 6 RAG phases
+├── app.py                 # FastAPI backend with all 6 RAG phases
 ├── requirements.txt       # Python dependencies
-├── Procfile               # Cloud deployment (Heroku/Render)
-├── .env                   # Environment variables (not tracked)
+├── Procfile               # Cloud deployment config
+├── .env                   # API keys (not tracked in git)
 ├── .gitignore
 └── static/
     ├── index.html         # Frontend UI
-    ├── index.css          # Premium dark theme design system
-    └── app.js             # Frontend logic (chat, PDF viewer, voice, etc.)
+    ├── index.css          # Premium dark theme
+    └── app.js             # Frontend logic
 ```
 
 ---
 
 ## ☁️ Deployment
 
-The app is cloud-ready with a `Procfile` for platforms like **Heroku** or **Render**:
+Cloud-ready with a `Procfile` for **Heroku**, **Render**, or similar platforms:
 
 ```
 web: uvicorn app:app --host 0.0.0.0 --port $PORT
 ```
 
-Set the `GEMINI_API_KEY` environment variable in your cloud platform's dashboard.
+Set `GEMINI_API_KEY` as an environment variable in your cloud platform's dashboard.
 
 ---
 
 ## 📄 License
 
-This project is open source and available under the [MIT License](LICENSE).
+This project is open source under the [MIT License](LICENSE).
 
 ---
 
-<div align="center">
-
-**Built with ❤️ by [Codinggenie2004](https://github.com/Codinggenie2004)**
-
-</div>
-]]>
+<p align="center">
+  Built with ❤️ by <a href="https://github.com/Codinggenie2004">Codinggenie2004</a>
+</p>
