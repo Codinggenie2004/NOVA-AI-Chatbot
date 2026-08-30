@@ -17,14 +17,9 @@ import json
 import uuid
 from typing import Optional
 
-# Prevent multi-threading memory spikes on cloud deployment hosts
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
 from dotenv import load_dotenv
 import numpy as np
-import torch
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from google import genai
 
@@ -32,9 +27,6 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-
-# Limit PyTorch inference threads for cloud stability (prevents OOM on 512MB RAM)
-torch.set_num_threads(2)
 
 # ---------------------------------------------------------------------------
 # Global Configuration
@@ -49,20 +41,15 @@ CHUNK_SIZE = 500               # Phase 1: 500-character chunk size
 TOP_K_CHUNKS = 5               # Phase 4: Top 5 retrieved chunks
 SIMILARITY_THRESHOLD = 0.35    # Phase 4: Minimum cosine similarity threshold
 GEMINI_MODEL = "gemini-3.6-flash"
+EMBEDDING_MODEL = "gemini-embedding-001"
 UPLOAD_DIR = "uploads"
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs("static", exist_ok=True)
 
-# Initialize AI & ML models (Phase 1)
-print("[*] Loading sentence-transformer model (all-MiniLM-L6-v2)...")
-try:
-    embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-except Exception:
-    embedding_model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
-print("[OK] Embedding model ready.")
-
+# Initialize Gemini Client (Handles both Embeddings & Chat Completion)
 client = genai.Client(api_key=API_KEY)
+print("[OK] Google Gemini Client & Embedding Engine ready.")
 
 # ===========================================================================
 # PHASE 1 & 2: In-Memory Stores & Source Tracking Metadata (Cell 8 + 9)
@@ -133,13 +120,41 @@ def extract_and_chunk_pdf(file_bytes: bytes, filename: str) -> list[dict]:
     return new_chunks
 
 
+def embed_texts(texts: list[str]) -> np.ndarray:
+    """
+    Phase 1: Generate dense vector embeddings using Google Gemini Embeddings API.
+    Batches requests to stay within API payload limits.
+    """
+    if not texts:
+        return np.empty((0, 3072))
+    vectors = []
+    for i in range(0, len(texts), 50):
+        batch = texts[i : i + 50]
+        res = client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=batch
+        )
+        for emb in res.embeddings:
+            vectors.append(emb.values)
+    return np.array(vectors)
+
+
+def embed_query(query: str) -> np.ndarray:
+    """Generate embedding for search query using Google Gemini Embeddings API."""
+    res = client.models.embed_content(
+        model=EMBEDDING_MODEL,
+        contents=query
+    )
+    return np.array(res.embeddings[0].values)
+
+
 def rebuild_embeddings():
     """
-    Phase 1: Generate dense vector embeddings for all chunks using all-MiniLM-L6-v2 (Cell 9).
+    Phase 1: Generate dense vector embeddings for all chunks using Google Gemini Embeddings API.
     """
     global chunk_embeddings
     if chunks:
-        chunk_embeddings = embedding_model.encode([c["text"] for c in chunks])
+        chunk_embeddings = embed_texts([c["text"] for c in chunks])
     else:
         chunk_embeddings = None
 
@@ -156,7 +171,7 @@ def retrieve_chunks(query: str, session_id: str = "") -> list[dict]:
         return []
 
     # Encode query and compute cosine similarity against all chunk embeddings
-    query_vec = embedding_model.encode(query)
+    query_vec = embed_query(query)
     scores = cosine_similarity([query_vec], chunk_embeddings)[0]
     top_indices = scores.argsort()[::-1][:TOP_K_CHUNKS]
 
@@ -177,7 +192,7 @@ def retrieve_chunks(query: str, session_id: str = "") -> list[dict]:
     history = chat_histories.get(session_id, [])
     if len(retrieved) < 2 and history:
         last_question = history[-1][0]
-        fallback_vec = embedding_model.encode(f"{last_question} {query}")
+        fallback_vec = embed_query(f"{last_question} {query}")
         fb_scores = cosine_similarity([fallback_vec], chunk_embeddings)[0]
         for rank, idx in enumerate(fb_scores.argsort()[::-1][:TOP_K_CHUNKS], start=1):
             if fb_scores[idx] >= SIMILARITY_THRESHOLD:
