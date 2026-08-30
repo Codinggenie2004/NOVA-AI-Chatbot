@@ -385,8 +385,6 @@ async function startNewChat() {
   closeSourceModal();
   closePdfViewer();
   closeMobileSidebar();
-
-  showToast('New chat started & all documents cleared ✨', 'success', 2500);
 }
 window.startNewChat = startNewChat;
 
