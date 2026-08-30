@@ -15,6 +15,7 @@ import os
 import io
 import json
 import uuid
+import tempfile
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -42,14 +43,24 @@ TOP_K_CHUNKS = 5               # Phase 4: Top 5 retrieved chunks
 SIMILARITY_THRESHOLD = 0.35    # Phase 4: Minimum cosine similarity threshold
 GEMINI_MODEL = "gemini-3.6-flash"
 EMBEDDING_MODEL = "gemini-embedding-001"
-UPLOAD_DIR = "uploads"
 
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# Writable directory for both standard and serverless (Vercel/Render) hosting
+if os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME") or not os.access(".", os.W_OK):
+    UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "nova_uploads")
+else:
+    UPLOAD_DIR = "uploads"
+
+try:
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+except Exception:
+    UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "nova_uploads")
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 os.makedirs("static", exist_ok=True)
 
 # Initialize Gemini Client (Handles both Embeddings & Chat Completion)
 client = genai.Client(api_key=API_KEY)
-print("[OK] Google Gemini Client & Embedding Engine ready.")
+print(f"[OK] Google Gemini Client & Embedding Engine ready. Upload directory: {UPLOAD_DIR}")
 
 # ===========================================================================
 # PHASE 1 & 2: In-Memory Stores & Source Tracking Metadata (Cell 8 + 9)
@@ -253,33 +264,55 @@ async def upload_document(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
-    file_bytes = await file.read()
-    
-    # Save PDF locally for in-app PDF.js viewer
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_path, "wb") as f:
-        f.write(file_bytes)
+    try:
+        file_bytes = await file.read()
+        
+        # Save PDF locally for in-app PDF.js viewer
+        file_path = os.path.join(UPLOAD_DIR, file.filename)
+        try:
+            with open(file_path, "wb") as f:
+                f.write(file_bytes)
+        except Exception as io_err:
+            print(f"[!] Note on saving PDF to disk: {io_err}")
 
-    new_chunks = extract_and_chunk_pdf(file_bytes, file.filename)
-    if not new_chunks:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        raise HTTPException(status_code=400, detail="Could not extract text from this PDF.")
+        new_chunks = extract_and_chunk_pdf(file_bytes, file.filename)
+        if not new_chunks:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=400, detail="Could not extract text from this PDF. Ensure it contains selectable text.")
 
-    chunks.extend(new_chunks)
-    if file.filename not in documents:
-        documents.append(file.filename)
+        chunks.extend(new_chunks)
+        if file.filename not in documents:
+            documents.append(file.filename)
 
-    rebuild_embeddings()
-    suggested_questions = generate_document_insights(new_chunks, file.filename)
+        rebuild_embeddings()
 
-    return {
-        "message": f"'{file.filename}' indexed successfully",
-        "chunks_added": len(new_chunks),
-        "total_chunks": len(chunks),
-        "documents": documents,
-        "suggested_questions": suggested_questions,
-    }
+        try:
+            suggested_questions = generate_document_insights(new_chunks, file.filename)
+        except Exception as e:
+            print(f"[!] Warning generating insights: {e}")
+            suggested_questions = [
+                f"What are the main findings in {file.filename}?",
+                f"Summarize the core methodology in {file.filename}.",
+                f"What are the conclusions discussed in {file.filename}?"
+            ]
+
+        return {
+            "message": f"'{file.filename}' indexed successfully",
+            "chunks_added": len(new_chunks),
+            "total_chunks": len(chunks),
+            "documents": documents,
+            "suggested_questions": suggested_questions,
+        }
+    except HTTPException:
+        raise
+    except Exception as err:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Upload processing failed: {str(err)}")
 
 
 @app.get("/api/documents")
