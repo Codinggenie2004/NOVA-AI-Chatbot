@@ -77,6 +77,8 @@ const tabDocs = $('#tab-docs');
 const panelChats = $('#panel-chats');
 const panelDocs = $('#panel-docs');
 const newChatBtn = $('#new-chat-btn');
+const sidebarNewChatBtn = $('#sidebar-new-chat-btn');
+const headerNewChatBtn = $('#header-new-chat-btn');
 const threadsList = $('#threads-list');
 const activeChatTitle = $('#active-chat-title');
 const clearBtn = $('#clear-btn');
@@ -321,20 +323,82 @@ function renameThread(threadId, newTitle) {
 }
 window.renameThread = renameThread;
 
+async function startNewChat() {
+  // Stop active speech synthesis & voice recording
+  stopReadAloud();
+  stopRecording();
+
+  try {
+    // Call backend endpoint to reset conversation memory and delete all uploaded documents
+    await fetch(`/api/new-chat?session_id=${encodeURIComponent(state.sessionId)}`, {
+      method: 'POST',
+    });
+  } catch (err) {
+    console.warn('Backend reset error:', err);
+    try {
+      await fetch('/api/documents', { method: 'DELETE' });
+      await fetch(`/api/chat/clear?session_id=${encodeURIComponent(state.sessionId)}`, { method: 'POST' });
+    } catch (e) {
+      console.warn('Fallback reset error:', e);
+    }
+  }
+
+  // Create brand new session ID
+  const newId = crypto.randomUUID();
+  state.sessionId = newId;
+  localStorage.setItem('rag_active_session_id', newId);
+
+  // Reset thread list to new fresh conversation
+  const newThread = {
+    id: newId,
+    title: 'Chat',
+    messages: [],
+    created: Date.now(),
+  };
+  state.threads = [newThread];
+  saveThreads();
+
+  // Reset document & memory state
+  state.documents = [];
+  state.suggestedQuestions = [];
+  state.sourcesStore.clear();
+  state.isLoading = false;
+  state.hasMessages = false;
+
+  // Reset input field
+  if (chatInput) {
+    chatInput.value = '';
+    chatInput.style.height = 'auto';
+  }
+  if (sendBtn) sendBtn.disabled = true;
+
+  // Refresh UI elements
+  renderDocuments();
+  updateStatus();
+  renderThreads();
+  renderWelcomeState();
+
+  const bar = $('#chat-suggestions-bar');
+  if (bar) bar.style.display = 'none';
+
+  // Close modals & mobile sidebar if open
+  closeSourceModal();
+  closePdfViewer();
+  closeMobileSidebar();
+
+  showToast('New chat started & all documents cleared ✨', 'success', 2500);
+}
+window.startNewChat = startNewChat;
+
+// Attach New Chat handlers
 if (newChatBtn) {
-  newChatBtn.addEventListener('click', () => {
-    const newId = crypto.randomUUID();
-    const newThread = {
-      id: newId,
-      title: `Chat ${state.threads.length + 1}`,
-      messages: [],
-      created: Date.now(),
-    };
-    state.threads.unshift(newThread);
-    saveThreads();
-    switchThread(newId);
-    showToast('New conversation started ✨', 'info', 2000);
-  });
+  newChatBtn.addEventListener('click', startNewChat);
+}
+if (sidebarNewChatBtn) {
+  sidebarNewChatBtn.addEventListener('click', startNewChat);
+}
+if (headerNewChatBtn) {
+  headerNewChatBtn.addEventListener('click', startNewChat);
 }
 
 if (clearAllChatsBtn) {
@@ -1247,25 +1311,10 @@ exportChatBtn.addEventListener('click', () => {
   showToast('Chat exported as Markdown file! 📥', 'success');
 });
 
-// Clear current chat
-clearBtn.addEventListener('click', async () => {
-  try {
-    await fetch(`/api/chat/clear?session_id=${state.sessionId}`, {
-      method: 'POST',
-    });
-
-    const thread = getActiveThread();
-    if (thread) {
-      thread.messages = [];
-      saveThreads();
-    }
-
-    loadThreadMessages();
-    showToast('Current conversation cleared', 'success', 2000);
-  } catch {
-    showToast('Failed to clear conversation', 'error');
-  }
-});
+// New chat / Clear handler
+if (clearBtn) {
+  clearBtn.addEventListener('click', startNewChat);
+}
 
 // ---------------------------------------------------------------------------
 // Formatting Helpers & KaTeX Math Rendering

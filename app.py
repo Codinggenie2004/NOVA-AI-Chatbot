@@ -282,6 +282,27 @@ async def get_pdf_file(filename: str):
     return FileResponse(file_path, media_type="application/pdf", filename=filename)
 
 
+@app.delete("/api/documents")
+async def delete_all_documents():
+    """Delete all documents from index and disk, then reset vector embeddings."""
+    global chunks, chunk_embeddings, documents
+
+    if os.path.exists(UPLOAD_DIR):
+        for filename in os.listdir(UPLOAD_DIR):
+            file_path = os.path.join(UPLOAD_DIR, filename)
+            if os.path.isfile(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+
+    documents.clear()
+    chunks.clear()
+    chunk_embeddings = None
+
+    return {"message": "All documents deleted successfully.", "documents": [], "total_chunks": 0}
+
+
 @app.delete("/api/documents/{filename}")
 async def delete_document(filename: str):
     """Delete a document from index and disk, then re-compute vector embeddings."""
@@ -366,6 +387,38 @@ async def clear_chat(session_id: str = ""):
     if session_id in chat_histories:
         del chat_histories[session_id]
     return {"message": "Chat history cleared."}
+
+
+@app.post("/api/new-chat")
+async def start_new_chat(session_id: str = ""):
+    """
+    New Chat: Clear conversation memory for session and delete all present indexed files.
+    """
+    global chunks, chunk_embeddings, documents
+
+    if session_id and session_id in chat_histories:
+        del chat_histories[session_id]
+    elif not session_id:
+        chat_histories.clear()
+
+    if os.path.exists(UPLOAD_DIR):
+        for filename in os.listdir(UPLOAD_DIR):
+            file_path = os.path.join(UPLOAD_DIR, filename)
+            if os.path.isfile(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+
+    documents.clear()
+    chunks.clear()
+    chunk_embeddings = None
+
+    return {
+        "message": "New chat started and all present documents deleted.",
+        "documents": [],
+        "total_chunks": 0
+    }
 
 
 # ---------------------------------------------------------------------------
