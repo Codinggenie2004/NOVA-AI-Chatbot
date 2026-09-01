@@ -5,7 +5,7 @@ Direct implementation of all 6 Phases from the Colab Research Notebook:
   - Phase 1: Multi-Document Ingestion (pypdf, 500-char chunks, fastembed all-MiniLM-L6-v2)
   - Phase 2: Source Tracking (Document name + Page number metadata)
   - Phase 3: Citation Generation (Structured source citations per answer)
-  - Phase 4: Retrieval Quality (Dense Cosine Similarity with 0.35 threshold filter)
+  - Phase 4: Retrieval Quality (65% Dense Cosine + 35% BM25, 0.35 threshold filter)
   - Phase 5: Conversation Memory (Session history & contextual query expansion)
   - Phase 6: Prompt Engineering (Beginner, Research, Interview modes)
   - Ephemeral Zero-Retention: Per-session memory & auto-cleanup on close/inactivity
@@ -16,6 +16,7 @@ import os
 import io
 import json
 import time
+import uuid
 import shutil
 import asyncio
 from typing import Optional
@@ -73,9 +74,56 @@ def embed_query(query: str) -> np.ndarray:
 
 
 # ===========================================================================
+# Option C: BM25 Lexical Search Engine (Pure Python & Dependency-Free)
+# ===========================================================================
+import re
+import math
+
+def tokenize(text: str) -> list[str]:
+    """Tokenize text into lowercase alphanumeric words."""
+    return re.findall(r"\w+", text.lower())
+
+class SimpleBM25:
+    """Fast, lightweight BM25Okapi ranking implementation."""
+    def __init__(self, corpus: list[list[str]], k1: float = 1.5, b: float = 0.75):
+        self.k1 = k1
+        self.b = b
+        self.corpus_size = len(corpus)
+        self.doc_lens = [len(doc) for doc in corpus]
+        self.avg_doc_len = sum(self.doc_lens) / self.corpus_size if self.corpus_size > 0 else 1.0
+        self.doc_freqs = []
+        self.nd: dict[str, int] = {}
+        for doc in corpus:
+            freqs = {}
+            for word in doc:
+                freqs[word] = freqs.get(word, 0) + 1
+            self.doc_freqs.append(freqs)
+            for word in freqs:
+                self.nd[word] = self.nd.get(word, 0) + 1
+
+        self.idf = {}
+        for word, freq in self.nd.items():
+            self.idf[word] = math.log((self.corpus_size - freq + 0.5) / (freq + 0.5) + 1.0)
+
+    def get_scores(self, query_tokens: list[str]) -> np.ndarray:
+        scores = np.zeros(self.corpus_size, dtype=np.float32)
+        for q in query_tokens:
+            if q not in self.idf:
+                continue
+            idf = self.idf[q]
+            for idx, freqs in enumerate(self.doc_freqs):
+                if q in freqs:
+                    tf = freqs[q]
+                    doc_len = self.doc_lens[idx]
+                    score = idf * (tf * (self.k1 + 1)) / (tf + self.k1 * (1 - self.b + self.b * (doc_len / self.avg_doc_len)))
+                    scores[idx] += score
+        return scores
+
+
+# ===========================================================================
 # Zero-Retention Ephemeral Session Store
 # ===========================================================================
-# sessions: {session_id: {"chunks": [], "chunk_embeddings": np.ndarray, "documents": [], "history": [], "last_active": float}}
+# sessions: {session_id: {"chunks": [], "chunk_embeddings": np.ndarray, "bm25_index": SimpleBM25, "documents": [], "history": [], "last_active": float}}
 sessions: dict[str, dict] = {}
 
 
@@ -93,6 +141,7 @@ def get_session(session_id: str = "") -> dict:
         sessions[sid] = {
             "chunks": [],
             "chunk_embeddings": None,
+            "bm25_index": None,
             "documents": [],
             "history": [],
             "last_active": now
@@ -164,7 +213,7 @@ def extract_and_chunk_pdf(file_bytes: bytes, filename: str) -> list[dict]:
 
 
 def rebuild_index(sess: dict, new_chunks: list[dict] = None):
-    """Rebuild or incrementally update dense embeddings matrix for a session."""
+    """Rebuild or incrementally update dense embeddings matrix and BM25 index for a session."""
     if new_chunks:
         new_vecs = embed_texts([c["text"] for c in new_chunks])
         sess["chunk_embeddings"] = new_vecs if sess["chunk_embeddings"] is None or len(sess["chunks"]) == 0 else np.vstack([sess["chunk_embeddings"], new_vecs])
@@ -173,6 +222,10 @@ def rebuild_index(sess: dict, new_chunks: list[dict] = None):
         sess["chunk_embeddings"] = embed_texts([c["text"] for c in sess["chunks"]])
     else:
         sess["chunk_embeddings"] = None
+        sess["bm25_index"] = None
+        return
+
+    sess["bm25_index"] = SimpleBM25([tokenize(c["text"]) for c in sess["chunks"]])
 
 
 def cosine_sim(matrix: np.ndarray, vector: np.ndarray) -> np.ndarray:
@@ -185,39 +238,50 @@ def cosine_sim(matrix: np.ndarray, vector: np.ndarray) -> np.ndarray:
 
 
 # ===========================================================================
-# PHASE 4: Dense Vector Cosine Similarity Retrieval & Confidence Scoring
+# PHASE 4 & Option C: Hybrid Retrieval (BM25 + Dense Cosine) & Confidence Scoring
 # ===========================================================================
 def retrieve_chunks(query: str, session_id: str = "") -> list[dict]:
-    """Phase 4: Dense Cosine Vector Similarity with threshold filtering."""
+    """Hybrid search combining Dense Cosine Vector Similarity (65%) and BM25 Keyword Matching (35%)."""
     sess = get_session(session_id)
     chunk_embeddings = sess["chunk_embeddings"]
     chunks = sess["chunks"]
+    bm25_index = sess["bm25_index"]
 
     if chunk_embeddings is None or len(chunks) == 0:
         return []
 
-    q_vec = embed_query(query)
-    vec_scores = cosine_sim(chunk_embeddings, q_vec)
+    def _score_query(q: str):
+        q_vec = embed_query(q)
+        v_scores = cosine_sim(chunk_embeddings, q_vec)
+        if bm25_index is not None:
+            bm_raw = bm25_index.get_scores(tokenize(q))
+            bm_max = np.max(bm_raw) if len(bm_raw) > 0 and np.max(bm_raw) > 0 else 1.0
+            bm_norm = bm_raw / bm_max
+        else:
+            bm_norm = np.zeros(len(chunks), dtype=np.float32)
+        return (0.65 * v_scores) + (0.35 * bm_norm), v_scores, bm_norm
+
+    hybrid_scores, vec_scores, bm25_norm = _score_query(query)
     retrieved = []
 
-    for rank, idx in enumerate(vec_scores.argsort()[::-1][:TOP_K_CHUNKS], start=1):
-        if vec_scores[idx] >= SIMILARITY_THRESHOLD:
+    for rank, idx in enumerate(hybrid_scores.argsort()[::-1][:TOP_K_CHUNKS], start=1):
+        if vec_scores[idx] >= SIMILARITY_THRESHOLD or bm25_norm[idx] >= 0.5:
             retrieved.append({
                 "text": chunks[idx]["text"], "doc": chunks[idx]["doc"], "page": chunks[idx]["page"],
-                "rank": rank, "score": round(float(vec_scores[idx]), 3),
-                "confidence": min(98, max(20, int(round(float(vec_scores[idx]) * 100))))
+                "rank": rank, "score": round(float(hybrid_scores[idx]), 3),
+                "confidence": min(98, max(20, int(round(float(hybrid_scores[idx]) * 100))))
             })
 
     # Contextual fallback: combine recent conversation memory for follow-up questions
     history = sess.get("history", [])
     if len(retrieved) < 2 and history:
-        fb_vec = cosine_sim(chunk_embeddings, embed_query(f"{history[-1][0]} {query}"))
-        for idx in fb_vec.argsort()[::-1][:TOP_K_CHUNKS]:
+        fb_hybrid, fb_vec, _ = _score_query(f"{history[-1][0]} {query}")
+        for idx in fb_hybrid.argsort()[::-1][:TOP_K_CHUNKS]:
             if fb_vec[idx] >= SIMILARITY_THRESHOLD and not any(r["text"] == chunks[idx]["text"] for r in retrieved):
                 retrieved.append({
                     "text": chunks[idx]["text"], "doc": chunks[idx]["doc"], "page": chunks[idx]["page"],
-                    "rank": len(retrieved) + 1, "score": round(float(fb_vec[idx]), 3),
-                    "confidence": min(98, max(20, int(round(float(fb_vec[idx]) * 100))))
+                    "rank": len(retrieved) + 1, "score": round(float(fb_hybrid[idx]), 3),
+                    "confidence": min(98, max(20, int(round(float(fb_hybrid[idx]) * 100))))
                 })
 
     return retrieved[:TOP_K_CHUNKS]
@@ -255,7 +319,7 @@ def generate_document_insights(sample_chunks: list[dict], filename: str) -> list
 # ===========================================================================
 # FastAPI Web Application & REST API Endpoints
 # ===========================================================================
-app = FastAPI(title="RAG Research Chatbot", version="2.2.0")
+app = FastAPI(title="RAG Research Chatbot", version="2.1.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 class ChatRequest(BaseModel):
@@ -390,12 +454,13 @@ async def delete_document(filename: str, session_id: str = ""):
     return {"message": f"'{filename}' deleted.", "documents": sess["documents"], "total_chunks": len(sess["chunks"])}
 
 
+@app.post("/api/chat")
 @app.post("/api/chat/stream")
 async def chat_stream(req: ChatRequest):
     """
     Unified RAG Endpoint:
       - Phase 3: Structured citations (doc + page + rank)
-      - Phase 4: Cosine similarity threshold filtering
+      - Phase 4: Cosine + BM25 hybrid threshold filtering
       - Phase 5: Session conversation memory injection
       - Phase 6: Mode-based prompt selection
     """
@@ -483,6 +548,7 @@ async def session_ping(session_id: str = ""):
 # Cloud & Render Startup
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    # pyrefly: ignore [missing-import]
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     host = os.environ.get("HOST", "127.0.0.1")
