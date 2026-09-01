@@ -18,9 +18,10 @@ if (window.pdfjsLib) {
 // ---------------------------------------------------------------------------
 // State Management
 // ---------------------------------------------------------------------------
+const defaultSessionId = crypto.randomUUID();
 const state = {
-  sessionId: localStorage.getItem('rag_active_session_id') || crypto.randomUUID(),
-  threads: JSON.parse(localStorage.getItem('rag_threads') || '[]'),
+  sessionId: defaultSessionId,
+  threads: [{ id: defaultSessionId, title: 'Chat', messages: [], created: Date.now() }],
   currentMode: 'beginner',
   documents: [],
   isLoading: false,
@@ -39,27 +40,7 @@ const state = {
   activeSpeechUtterance: null,
 };
 
-// Initialize active thread
-if (state.threads.length === 0) {
-  const defaultThread = {
-    id: state.sessionId,
-    title: 'Chat',
-    messages: [],
-    created: Date.now(),
-  };
-  state.threads.push(defaultThread);
-  saveThreads();
-} else {
-  const activeExists = state.threads.some((t) => t.id === state.sessionId);
-  if (!activeExists) {
-    state.sessionId = state.threads[0].id;
-  }
-}
-localStorage.setItem('rag_active_session_id', state.sessionId);
-
-function saveThreads() {
-  localStorage.setItem('rag_threads', JSON.stringify(state.threads));
-}
+function saveThreads() {}
 
 function getActiveThread() {
   return state.threads.find((t) => t.id === state.sessionId) || state.threads[0];
@@ -107,6 +88,7 @@ const chatArea = $('#chat-area');
 const welcomeState = $('#welcome-state');
 const suggestionsWrapper = $('#suggestions-wrapper');
 const suggestionsChips = $('#suggestions-chips');
+const chatSuggestionsBar = $('#chat-suggestions-bar');
 const chatInput = $('#chat-input');
 const sendBtn = $('#send-btn');
 const voiceBtn = $('#voice-btn');
@@ -135,6 +117,20 @@ const pdfZoomOutBtn = $('#pdf-zoom-out-btn');
 const pdfCloseBtn = $('#pdf-close-btn');
 const pdfCanvas = $('#pdf-canvas');
 const pdfLoading = $('#pdf-loading');
+
+// Executive Paper Summary Modal (Option B)
+const summaryModal = $('#summary-modal');
+const summaryDocTitle = $('#summary-doc-title');
+const summaryCloseBtn = $('#summary-close-btn');
+const summaryDoneBtn = $('#summary-done-btn');
+const summaryCopyBtn = $('#summary-copy-btn');
+const summaryAskBtn = $('#summary-ask-btn');
+const summaryLoading = $('#summary-loading');
+const summaryContent = $('#summary-content');
+const sumObjective = $('#sum-objective');
+const sumMethodology = $('#sum-methodology');
+const sumFindings = $('#sum-findings');
+const sumLimitations = $('#sum-limitations');
 
 // ---------------------------------------------------------------------------
 // Toast Notifications
@@ -324,55 +320,31 @@ function renameThread(threadId, newTitle) {
 window.renameThread = renameThread;
 
 async function startNewChat() {
-  // Stop active speech synthesis & voice recording
   stopReadAloud();
   stopRecording();
 
   try {
-    // Call backend endpoint to reset conversation memory and delete all uploaded documents
-    await fetch(`/api/new-chat?session_id=${encodeURIComponent(state.sessionId)}`, {
-      method: 'POST',
-    });
+    await fetch(`/api/new-chat?session_id=${encodeURIComponent(state.sessionId)}`, { method: 'POST' });
   } catch (err) {
-    console.warn('Backend reset error:', err);
-    try {
-      await fetch('/api/documents', { method: 'DELETE' });
-      await fetch(`/api/chat/clear?session_id=${encodeURIComponent(state.sessionId)}`, { method: 'POST' });
-    } catch (e) {
-      console.warn('Fallback reset error:', e);
-    }
+    console.warn('New chat error:', err);
   }
 
-  // Create brand new session ID
   const newId = crypto.randomUUID();
   state.sessionId = newId;
-  localStorage.setItem('rag_active_session_id', newId);
+  state.threads = [{ id: newId, title: 'Chat', messages: [], created: Date.now() }];
 
-  // Reset thread list to new fresh conversation
-  const newThread = {
-    id: newId,
-    title: 'Chat',
-    messages: [],
-    created: Date.now(),
-  };
-  state.threads = [newThread];
-  saveThreads();
-
-  // Reset document & memory state
   state.documents = [];
   state.suggestedQuestions = [];
   state.sourcesStore.clear();
   state.isLoading = false;
   state.hasMessages = false;
 
-  // Reset input field
   if (chatInput) {
     chatInput.value = '';
     chatInput.style.height = 'auto';
   }
   if (sendBtn) sendBtn.disabled = true;
 
-  // Refresh UI elements
   renderDocuments();
   updateStatus();
   renderThreads();
@@ -381,23 +353,15 @@ async function startNewChat() {
   const bar = $('#chat-suggestions-bar');
   if (bar) bar.style.display = 'none';
 
-  // Close modals & mobile sidebar if open
   closeSourceModal();
   closePdfViewer();
   closeMobileSidebar();
 }
 window.startNewChat = startNewChat;
 
-// Attach New Chat handlers
-if (newChatBtn) {
-  newChatBtn.addEventListener('click', startNewChat);
-}
-if (sidebarNewChatBtn) {
-  sidebarNewChatBtn.addEventListener('click', startNewChat);
-}
-if (headerNewChatBtn) {
-  headerNewChatBtn.addEventListener('click', startNewChat);
-}
+$$('#new-chat-btn, #sidebar-new-chat-btn, #header-new-chat-btn, #clear-btn').forEach((btn) => {
+  btn?.addEventListener('click', startNewChat);
+});
 
 if (clearAllChatsBtn) {
   clearAllChatsBtn.addEventListener('click', () => {
@@ -416,8 +380,6 @@ if (clearAllChatsBtn) {
     });
 
     state.threads = [];
-    localStorage.removeItem('rag_threads');
-    localStorage.removeItem('rag_active_session_id');
     state.sessionId = crypto.randomUUID();
 
     stopReadAloud();
@@ -430,11 +392,7 @@ if (clearAllChatsBtn) {
 
 function switchThread(threadId) {
   state.sessionId = threadId;
-  localStorage.setItem('rag_active_session_id', threadId);
-
-  // Stop any active speech
   stopReadAloud();
-
   renderThreads();
   loadThreadMessages();
 }
@@ -444,15 +402,11 @@ function deleteThread(threadId) {
   fetch(`/api/chat/clear?session_id=${threadId}`, { method: 'POST' }).catch(() => {});
 
   if (state.threads.length === 0) {
-    localStorage.removeItem('rag_threads');
-    localStorage.removeItem('rag_active_session_id');
     state.sessionId = crypto.randomUUID();
   } else if (state.sessionId === threadId) {
     state.sessionId = state.threads[0].id;
-    localStorage.setItem('rag_active_session_id', state.sessionId);
   }
 
-  saveThreads();
   renderThreads();
   loadThreadMessages();
   showToast('Chat deleted', 'info', 2000);
@@ -558,10 +512,29 @@ if (uploadZone) {
   });
 }
 
+let isUploadingBatch = false;
+
 async function handleFiles(files) {
-  for (const file of files) {
-    await uploadFile(file);
+  if (!files || files.length === 0 || isUploadingBatch) return;
+  isUploadingBatch = true;
+
+  if (uploadProgress) uploadProgress.classList.add('active');
+  const total = files.length;
+
+  for (let i = 0; i < total; i++) {
+    const file = files[i];
+    const prefix = total > 1 ? `[${i + 1}/${total}] ` : '';
+    await uploadSingleFile(file, prefix);
   }
+
+  if (uploadInput) uploadInput.value = '';
+  isUploadingBatch = false;
+
+  setTimeout(() => {
+    if (!isUploadingBatch && uploadProgress) {
+      uploadProgress.classList.remove('active');
+    }
+  }, 1800);
 }
 
 function setProgress(text, percent) {
@@ -569,22 +542,18 @@ function setProgress(text, percent) {
   if (progressText) progressText.textContent = text;
 }
 
-async function uploadFile(file) {
-  uploadProgress.classList.add('active');
-  setProgress(`Uploading ${file.name}...`, 35);
-
-  const timer1 = setTimeout(() => setProgress('Generating AI summary...', 75), 1200);
+async function uploadSingleFile(file, prefix = '') {
+  setProgress(`${prefix}Indexing ${file.name}...`, 45);
 
   try {
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('session_id', state.sessionId);
 
     const res = await fetch('/api/upload', {
       method: 'POST',
       body: formData,
     });
-
-    clearTimeout(timer1);
 
     if (!res.ok) {
       const err = await res.json();
@@ -593,7 +562,7 @@ async function uploadFile(file) {
 
     const data = await res.json();
 
-    setProgress(`Uploaded successfully!`, 100);
+    setProgress(`${prefix}${file.name} indexed!`, 100);
 
     state.documents = data.documents;
     renderDocuments();
@@ -604,29 +573,25 @@ async function uploadFile(file) {
       renderSuggestions(data.suggested_questions);
     }
 
-    showToast(`${file.name} uploaded successfully`, 'success');
+    showToast(`${file.name} indexed successfully`, 'success');
   } catch (err) {
-    clearTimeout(timer1);
     if (progressBarFill) progressBarFill.style.width = '0%';
-    if (progressText) progressText.textContent = `❌ Upload failed`;
-    showToast(err.message, 'error');
+    if (progressText) progressText.textContent = `❌ ${prefix}${file.name} failed`;
+    showToast(`${file.name}: ${err.message}`, 'error');
   }
-
-  setTimeout(() => {
-    uploadProgress.classList.remove('active');
-  }, 2200);
-
-  uploadInput.value = '';
 }
 
 function renderDocuments() {
+  if (documentList) {
+    documentList.querySelectorAll('.document-item').forEach((el) => el.remove());
+  }
+
   if (state.documents.length === 0) {
-    noDocuments.style.display = '';
+    if (noDocuments) noDocuments.style.display = '';
     return;
   }
 
-  noDocuments.style.display = 'none';
-  documentList.querySelectorAll('.document-item').forEach((el) => el.remove());
+  if (noDocuments) noDocuments.style.display = 'none';
 
   state.documents.forEach((doc) => {
     const li = document.createElement('li');
@@ -634,9 +599,81 @@ function renderDocuments() {
     li.innerHTML = `
       <span class="doc-icon" style="cursor: pointer;" title="Click to view PDF" onclick="openPdfViewer('${escapeHtml(doc)}', 1)">📄</span>
       <span class="doc-name" style="cursor: pointer;" title="Click to view PDF" onclick="openPdfViewer('${escapeHtml(doc)}', 1)">${escapeHtml(doc)}</span>
+      <button class="doc-summary-btn" title="View Executive Summary" onclick="openDocumentSummary('${escapeHtml(doc)}')">📋</button>
       <button class="doc-delete-btn" title="Delete document" onclick="deleteDocument('${escapeHtml(doc)}')">🗑️</button>
     `;
     documentList.appendChild(li);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Option B: Executive Paper Summary
+// ---------------------------------------------------------------------------
+let activeSummaryDoc = null;
+let activeSummaryData = null;
+
+async function openDocumentSummary(filename) {
+  activeSummaryDoc = filename;
+  summaryDocTitle.textContent = filename;
+  summaryModal.style.display = 'flex';
+  summaryLoading.style.display = 'flex';
+  summaryContent.style.display = 'none';
+
+  try {
+    const res = await fetch(`/api/documents/${encodeURIComponent(filename)}/summary?session_id=${encodeURIComponent(state.sessionId)}`);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to fetch summary');
+    }
+    const data = await res.json();
+    activeSummaryData = data.summary;
+
+    sumObjective.textContent = data.summary.objective || 'Not available';
+    sumMethodology.textContent = data.summary.methodology || 'Not available';
+    sumFindings.textContent = data.summary.key_findings || 'Not available';
+    sumLimitations.textContent = data.summary.limitations || 'Not available';
+
+    summaryLoading.style.display = 'none';
+    summaryContent.style.display = 'block';
+  } catch (err) {
+    summaryLoading.style.display = 'none';
+    showToast(`Summary error: ${err.message}`, 'error');
+    closeDocumentSummary();
+  }
+}
+window.openDocumentSummary = openDocumentSummary;
+
+function closeDocumentSummary() {
+  summaryModal.style.display = 'none';
+  activeSummaryDoc = null;
+  activeSummaryData = null;
+}
+
+if (summaryCloseBtn) summaryCloseBtn.addEventListener('click', closeDocumentSummary);
+if (summaryDoneBtn) summaryDoneBtn.addEventListener('click', closeDocumentSummary);
+if (summaryModal) {
+  summaryModal.addEventListener('click', (e) => {
+    if (e.target === summaryModal) closeDocumentSummary();
+  });
+}
+
+if (summaryCopyBtn) {
+  summaryCopyBtn.addEventListener('click', () => {
+    if (!activeSummaryData || !activeSummaryDoc) return;
+    const text = `# Executive Summary: ${activeSummaryDoc}\n\n### 🎯 Objective\n${activeSummaryData.objective}\n\n### 🔬 Methodology\n${activeSummaryData.methodology}\n\n### 📊 Key Findings\n${activeSummaryData.key_findings}\n\n### ⚠️ Limitations\n${activeSummaryData.limitations}\n`;
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('Executive summary copied to clipboard!', 'success');
+    });
+  });
+}
+
+if (summaryAskBtn) {
+  summaryAskBtn.addEventListener('click', () => {
+    if (!activeSummaryDoc) return;
+    const prompt = `Summarize the primary conclusions and core architecture of '${activeSummaryDoc}'.`;
+    closeDocumentSummary();
+    chatInput.value = prompt;
+    sendMessage();
   });
 }
 
@@ -646,7 +683,7 @@ async function deleteDocument(filename) {
   }
 
   try {
-    const res = await fetch(`/api/documents/${encodeURIComponent(filename)}`, {
+    const res = await fetch(`/api/documents/${encodeURIComponent(filename)}?session_id=${encodeURIComponent(state.sessionId)}`, {
       method: 'DELETE',
     });
 
@@ -679,33 +716,29 @@ function updateStatus() {
 // Suggested Questions
 // ---------------------------------------------------------------------------
 function renderSuggestions(questions) {
-  if (!questions || questions.length === 0) return;
+  if (!questions || !Array.isArray(questions) || questions.length === 0) return;
 
-  const chipsContainer = $('#suggestions-chips');
-  const barContainer = $('#bar-chips');
+  const makeChip = (q, cls) => {
+    const btn = document.createElement('button');
+    btn.className = cls;
+    btn.innerHTML = cls.includes('suggestion-chip') ? `✨ <span>${escapeHtml(q)}</span>` : escapeHtml(q);
+    btn.onclick = () => askQuestionDirectly(q);
+    return btn;
+  };
+
+  const chipsContainer = document.getElementById('suggestions-chips');
+  const barContainer = document.getElementById('bar-chips');
+  const chatBar = document.getElementById('chat-suggestions-bar');
+  const wrapper = document.getElementById('suggestions-wrapper');
 
   if (chipsContainer) {
-    chipsContainer.innerHTML = '';
-    questions.forEach((q) => {
-      const chip = document.createElement('button');
-      chip.className = 'suggestion-chip';
-      chip.innerHTML = `✨ <span>${escapeHtml(q)}</span>`;
-      chip.addEventListener('click', () => askQuestionDirectly(q));
-      chipsContainer.appendChild(chip);
-    });
-    if ($('#suggestions-wrapper')) $('#suggestions-wrapper').style.display = 'block';
+    chipsContainer.replaceChildren(...questions.map((q) => makeChip(q, 'suggestion-chip')));
+    if (wrapper) wrapper.style.display = 'block';
   }
 
-  if (barContainer && chatSuggestionsBar) {
-    chatSuggestionsBar.style.display = 'flex';
-    barContainer.innerHTML = '';
-    questions.forEach((q) => {
-      const chip = document.createElement('button');
-      chip.className = 'bar-chip';
-      chip.textContent = q;
-      chip.addEventListener('click', () => askQuestionDirectly(q));
-      barContainer.appendChild(chip);
-    });
+  if (barContainer && chatBar) {
+    chatBar.style.display = 'flex';
+    barContainer.replaceChildren(...questions.map((q) => makeChip(q, 'bar-chip')));
   }
 }
 
@@ -1038,7 +1071,6 @@ async function sendMessage() {
             receivedSources = event.sources || [];
             if (event.session_id) {
               state.sessionId = event.session_id;
-              localStorage.setItem('rag_active_session_id', state.sessionId);
             }
           } else if (event.type === 'token') {
             fullAnswerText += event.text;
@@ -1048,10 +1080,13 @@ async function sendMessage() {
           } else if (event.type === 'done') {
             fullAnswerText = event.answer || fullAnswerText;
           } else if (event.type === 'error') {
-            throw new Error(event.error);
+            bubbleEl.className = 'message-bubble error-bubble';
+            bubbleEl.innerHTML = `⚠️ <strong>Model Temporarily Busy</strong><br><span style="font-size: 13px; opacity: 0.9;">${escapeHtml(event.error)}</span>`;
+            showToast('AI model is busy — please retry your question', 'error');
+            return;
           }
         } catch (parseErr) {
-          console.warn('SSE Parse error', parseErr, jsonStr);
+          console.warn('SSE stream processing error:', parseErr);
         }
       }
     }
@@ -1098,11 +1133,18 @@ function renderSources(containerEl, sources) {
       const sourceId = `src-${Date.now()}-${idx}`;
       state.sourcesStore.set(sourceId, s);
 
+      const conf = s.confidence;
+      const confClass = conf >= 75 ? '' : conf >= 45 ? 'medium' : 'low';
+      const confBadge = conf
+        ? `<span class="confidence-badge ${confClass}">🎯 ${conf}% Match</span>`
+        : '';
+
       return `
         <div class="source-card interactive" onclick="openSourceModal('${sourceId}')" title="Click to view passage and PDF page">
           <span class="source-rank">#${s.rank || idx + 1}</span>
           <span class="source-doc">${escapeHtml(s.doc)}</span>
           <span class="source-page">Page ${s.page}</span>
+          ${confBadge}
           <span class="source-view-hint">🔍 View Passage</span>
         </div>
       `;
@@ -1129,7 +1171,7 @@ function openSourceModal(sourceId) {
   activeModalSource = source;
   modalSourceRank.textContent = `#${source.rank || 1}`;
   modalDocTitle.textContent = source.doc;
-  modalMeta.textContent = `Page ${source.page}`;
+  modalMeta.textContent = `Page ${source.page}${source.confidence ? ` · 🎯 ${source.confidence}% Match` : ''}`;
   modalPassageText.textContent = source.text || 'No passage text available.';
 
   sourceModal.style.display = 'flex';
@@ -1155,26 +1197,27 @@ modalCopyBtn.addEventListener('click', () => {
 
 modalViewPdfBtn.addEventListener('click', () => {
   if (activeModalSource) {
-    const { doc, page } = activeModalSource;
+    const { doc, page, text } = activeModalSource;
     closeSourceModal();
-    openPdfViewer(doc, page);
+    openPdfViewer(doc, page, text);
   }
 });
 
 window.openSourceModal = openSourceModal;
 
 // ---------------------------------------------------------------------------
-// In-App PDF Viewer (PDF.js) with Page Jumping & Zoom
+// In-App PDF Viewer (PDF.js) with Page Jumping, Zoom, & Passage Highlighting
 // ---------------------------------------------------------------------------
-async function openPdfViewer(docName, pageNum = 1) {
+async function openPdfViewer(docName, pageNum = 1, highlightSnippet = '') {
   state.currentPdfName = docName;
   state.currentPdfPage = parseInt(pageNum) || 1;
+  state.currentHighlightSnippet = highlightSnippet || '';
   pdfDocTitle.textContent = docName;
   pdfModal.style.display = 'flex';
   pdfLoading.style.display = 'flex';
 
   try {
-    const url = `/api/documents/${encodeURIComponent(docName)}/file`;
+    const url = `/api/documents/${encodeURIComponent(docName)}/file?session_id=${encodeURIComponent(state.sessionId)}`;
     const loadingTask = pdfjsLib.getDocument(url);
     state.currentPdfDoc = await loadingTask.promise;
     state.totalPdfPages = state.currentPdfDoc.numPages;
@@ -1201,6 +1244,12 @@ async function renderPdfPage(pageNumber) {
   pdfPrevBtn.disabled = state.currentPdfPage <= 1;
   pdfNextBtn.disabled = state.currentPdfPage >= state.totalPdfPages;
 
+  // Clear previous highlight markers
+  const container = document.getElementById('pdf-canvas-container');
+  if (container) {
+    container.querySelectorAll('.pdf-highlight-marker').forEach((el) => el.remove());
+  }
+
   try {
     pdfLoading.style.display = 'flex';
     const page = await state.currentPdfDoc.getPage(state.currentPdfPage);
@@ -1217,6 +1266,39 @@ async function renderPdfPage(pageNumber) {
     };
 
     await page.render(renderContext).promise;
+
+    // Render yellow highlight overlay on matching text items (Option A)
+    if (state.currentHighlightSnippet && container) {
+      try {
+        const textContent = await page.getTextContent();
+        const snippetTokens = state.currentHighlightSnippet
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((w) => w.length > 3);
+
+        textContent.items.forEach((item) => {
+          const itemText = item.str.toLowerCase();
+          const matches = snippetTokens.some((tok) => itemText.includes(tok));
+          if (matches && item.width > 0 && item.height > 0) {
+            const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+            const x = tx[4];
+            const y = tx[5] - item.height * state.pdfScale;
+            const w = item.width * state.pdfScale;
+            const h = item.height * state.pdfScale * 1.25;
+
+            const marker = document.createElement('div');
+            marker.className = 'pdf-highlight-marker';
+            marker.style.left = `${Math.max(0, x)}px`;
+            marker.style.top = `${Math.max(0, y)}px`;
+            marker.style.width = `${w}px`;
+            marker.style.height = `${h}px`;
+            container.appendChild(marker);
+          }
+        });
+      } catch (hlErr) {
+        console.warn('Highlight overlay note:', hlErr);
+      }
+    }
   } catch (err) {
     console.warn('Page render error', err);
   } finally {
@@ -1338,27 +1420,11 @@ function escapeHtml(text) {
 
 function formatAnswer(text) {
   if (!text) return '';
-
-  if (window.marked && typeof window.marked.parse === 'function') {
-    try {
-      return window.marked.parse(text, { breaks: true, gfm: true });
-    } catch (e) {
-      console.warn('Marked parse error', e);
-    }
+  try {
+    return window.marked ? window.marked.parse(text, { breaks: true, gfm: true }) : escapeHtml(text);
+  } catch (e) {
+    return escapeHtml(text);
   }
-
-  let formatted = escapeHtml(text);
-  formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  formatted = formatted.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  formatted = formatted.replace(/`(.+?)`/g, '<code>$1</code>');
-  formatted = formatted.replace(/^[\-•]\s+(.+)$/gm, '<li>$1</li>');
-  formatted = formatted.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-  formatted = formatted.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
-  formatted = formatted.replace(/\n\n/g, '</p><p>');
-  formatted = formatted.replace(/\n/g, '<br>');
-  formatted = `<p>${formatted}</p>`;
-  formatted = formatted.replace(/<p>\s*<\/p>/g, '');
-  return formatted;
 }
 
 function renderMath(element) {
@@ -1389,7 +1455,7 @@ async function init() {
   loadThreadMessages();
 
   try {
-    const res = await fetch('/api/documents');
+    const res = await fetch(`/api/documents?session_id=${encodeURIComponent(state.sessionId)}`);
     if (res.ok) {
       const data = await res.json();
       state.documents = data.documents || [];
@@ -1402,3 +1468,19 @@ async function init() {
 }
 
 init();
+
+// ---------------------------------------------------------------------------
+// Zero-Retention Ephemeral Lifecycle: Beacon on Exit & Heartbeat
+// ---------------------------------------------------------------------------
+window.addEventListener('pagehide', () => {
+  if (navigator.sendBeacon && state.sessionId) {
+    navigator.sendBeacon(`/api/session/cleanup?session_id=${encodeURIComponent(state.sessionId)}`);
+  }
+});
+
+setInterval(() => {
+  if (state.sessionId) {
+    fetch(`/api/session/ping?session_id=${encodeURIComponent(state.sessionId)}`, { method: 'POST', keepalive: true }).catch(() => {});
+  }
+}, 45000);
+

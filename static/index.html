@@ -4,10 +4,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NOVA — AI-Powered Reasearch Assistant</title>
+  <title>NOVA — AI-Powered Research Assistant</title>
   <meta name="description"
     content="Upload your research PDFs and chat with an AI that retrieves relevant context, generates accurate answers with citations, and remembers your conversation." />
-  <link rel="stylesheet" href="/static/index.css?v=2.8.0" />
+  <link rel="stylesheet" href="/static/index.css?v=3.3.0" />
   <!-- KaTeX for Mathematical Expressions & Symbols -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
@@ -239,7 +239,52 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=2.8.0"></script>
+  <!-- ===== Executive Paper Summary Modal (Option B) ===== -->
+  <div class="modal-backdrop" id="summary-modal" style="display: none;">
+    <div class="modal-card summary-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-badge summary-badge">📋 Summary</div>
+          <div>
+            <h3 class="modal-title" id="summary-doc-title">Document Summary</h3>
+            <div class="modal-meta" id="summary-doc-meta">AI-Generated Executive Breakdown</div>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="summary-close-btn" title="Close">✕</button>
+      </div>
+      <div class="modal-body summary-body">
+        <div class="summary-loading" id="summary-loading" style="display: none;">
+          <div class="loading-spinner"></div>
+          <span>Analyzing document sections & synthesizing findings...</span>
+        </div>
+        <div class="summary-content" id="summary-content">
+          <div class="summary-section">
+            <div class="summary-section-header">🎯 Objective & Problem Statement</div>
+            <p class="summary-section-text" id="sum-objective"></p>
+          </div>
+          <div class="summary-section">
+            <div class="summary-section-header">🔬 Core Methodology & Approach</div>
+            <p class="summary-section-text" id="sum-methodology"></p>
+          </div>
+          <div class="summary-section">
+            <div class="summary-section-header">📊 Key Findings & Breakthroughs</div>
+            <p class="summary-section-text" id="sum-findings"></p>
+          </div>
+          <div class="summary-section">
+            <div class="summary-section-header">⚠️ Limitations & Open Challenges</div>
+            <p class="summary-section-text" id="sum-limitations"></p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-action-btn secondary" id="summary-ask-btn">💬 Ask Questions About Paper</button>
+        <button class="modal-action-btn secondary" id="summary-copy-btn">📋 Copy Summary</button>
+        <button class="modal-action-btn primary" id="summary-done-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=3.3.0"></script>
 </body>
 
 </html>
