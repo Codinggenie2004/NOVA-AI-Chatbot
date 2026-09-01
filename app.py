@@ -55,8 +55,8 @@ os.makedirs("static", exist_ok=True)
 
 # Initialize lightweight ONNX embedding model (Phase 1: all-MiniLM-L6-v2)
 print("[*] Initializing FastEmbed model (sentence-transformers/all-MiniLM-L6-v2)...")
-embedding_model = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
-print("[OK] FastEmbed ONNX model ready (<150MB RAM).")
+embedding_model = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2", threads=1)
+print("[OK] FastEmbed ONNX model ready (<120MB RAM).")
 
 client = genai.Client(api_key=API_KEY)
 
@@ -65,12 +65,12 @@ def embed_texts(texts: list[str]) -> np.ndarray:
     """Batch embed text strings into 384-d float32 vectors via ONNX Runtime."""
     if not texts:
         return np.empty((0, 384), dtype=np.float32)
-    return np.array(list(embedding_model.embed(texts)), dtype=np.float32)
+    return np.array(list(embedding_model.embed(texts, batch_size=16)), dtype=np.float32)
 
 
 def embed_query(query: str) -> np.ndarray:
     """Embed single query string into a 1D (384,) float32 vector."""
-    return next(embedding_model.embed([query]))
+    return next(embedding_model.embed([query], batch_size=1))
 
 
 # ===========================================================================
@@ -214,6 +214,7 @@ def extract_and_chunk_pdf(file_bytes: bytes, filename: str) -> list[dict]:
 
 def rebuild_index(sess: dict, new_chunks: list[dict] = None):
     """Rebuild or incrementally update dense embeddings matrix and BM25 index for a session."""
+    import gc
     if new_chunks:
         new_vecs = embed_texts([c["text"] for c in new_chunks])
         sess["chunk_embeddings"] = new_vecs if sess["chunk_embeddings"] is None or len(sess["chunks"]) == 0 else np.vstack([sess["chunk_embeddings"], new_vecs])
@@ -223,9 +224,11 @@ def rebuild_index(sess: dict, new_chunks: list[dict] = None):
     else:
         sess["chunk_embeddings"] = None
         sess["bm25_index"] = None
+        gc.collect()
         return
 
     sess["bm25_index"] = SimpleBM25([tokenize(c["text"]) for c in sess["chunks"]])
+    gc.collect()
 
 
 def cosine_sim(matrix: np.ndarray, vector: np.ndarray) -> np.ndarray:
